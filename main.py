@@ -7,6 +7,9 @@ from pymongo.errors import ConnectionFailure
 import cloudinary
 import cloudinary.uploader
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+
+origins = ["*"]
 
 load_dotenv()
 app = FastAPI()
@@ -16,6 +19,16 @@ cloudinary.config(
     api_key = os.getenv("CLOUDINARY_API_KEY"),
     api_secret = os.getenv("CLOUDINARY_API_SECRET_KEY")
 )
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 #Independent code to upload file
 @app.post("/api/upload")
@@ -31,6 +44,8 @@ async def upload(file:UploadFile = File(...)):
         "url":response.get("secure_url"),
         "public_id":response.get("public_id")
     }
+
+
 
 
 #For complaint registering
