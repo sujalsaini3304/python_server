@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mail import ConnectionConfig
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 origins = ["*"]
 
@@ -103,7 +104,7 @@ async def complainRegister(
             "description":description,
             "image_url":response.get("secure_url"),
             "public_id":response.get("public_id"),
-            "created_at":datetime.now()
+            "created_at":datetime.now(ZoneInfo("Asia/Kolkata"))
        })
        #Email sending for registered complaint 
        async def sendConfirmationThroughemail(email_data:EmailSchema, background_tasks: BackgroundTasks):
