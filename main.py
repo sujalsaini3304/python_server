@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mail import ConnectionConfig
 from fastapi_mail import FastMail, MessageSchema, MessageType
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 origins = ["*"]
