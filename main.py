@@ -1,18 +1,18 @@
-from fastapi import FastAPI , File , UploadFile , Form , BackgroundTasks
+from fastapi import FastAPI , File , UploadFile , Form , BackgroundTasks , HTTPException
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel ,  EmailStr
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure 
 import cloudinary
 import cloudinary.uploader
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mail import ConnectionConfig
 from fastapi_mail import FastMail, MessageSchema, MessageType
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-
+import json
 
 origins = ["*"]
 
@@ -71,7 +71,85 @@ async def upload(file:UploadFile = File(...)):
 
 
 
+#music-app
+@app.post("/api/upload/music")
+async def upload_music(
+    audio_file: UploadFile = File(...),
+    metadata: str = Form(...)
+):
+    try:
+        client = None
+        # Parse metadata
+        track_metadata = json.loads(metadata)
+        
+        # Upload to Cloudinary
+        audio_contents = await audio_file.read()
+        cloudinary_result = cloudinary.uploader.upload(
+           audio_contents , 
+           resource_type = "auto",
+           folder = "my-music-web-app/data/assets/"
+           )
+        
+        # Save to database
+        client = MongoClient(os.getenv("MONGODB_URL"))
+        client.admin.command('ping')
+        print("Connection established with database successfully.")
+        db = client["myMusicDatabase"]
+        collection = db["song"]
+        doc = collection.insert_one({
+            **track_metadata,
+            "cloudinary_url": cloudinary_result["secure_url"],
+            "cloudinary_id": cloudinary_result["public_id"],
+            "created_at":datetime.now(timezone.utc)
+        })
+        
+        saved_track = collection.find_one({"_id":doc.inserted_id})
+        created_at_ist = saved_track["created_at"].astimezone(ZoneInfo("Asia/Kolkata"))
 
+        return {
+            "id": str(doc.inserted_id),
+            "title": saved_track["title"],
+            "artist": saved_track["artist"],
+            "genre": saved_track["genre"],
+            "album": saved_track["album"],
+            "duration": saved_track["duration"],
+            "cloudinary_url": saved_track["cloudinary_url"],
+            "created_at": created_at_ist.isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if client :
+           client.close()
+           print("Connection closed with database.")   
+
+#fetching the song
+@app.get("/api/get/music_data")
+async def fetchMusic():
+    arr=[]
+    try:
+        client = None
+        client = MongoClient(os.getenv("MONGODB_URL"))
+        client.admin.command('ping')
+        print("Connection established with database successfully.")
+        db = client["myMusicDatabase"]
+        collection = db["song"]
+        for doc in collection.find():
+           doc["_id"]= str(doc["_id"])
+           arr.append(doc)
+        return arr   
+
+    except Exception as e:
+       return {
+           "Error": e
+       }
+    finally:
+        if client :
+           client.close()
+           print("Connection closed with database.")          
+
+#student-complaint-management-system
 #For complaint registering
 @app.post("/api/register/complaint/student")
 async def complainRegister(
@@ -150,7 +228,7 @@ async def complainRegister(
             </div>
             </div>
             """
-            ) ,
+            ),
              background_tasks
             )
        
