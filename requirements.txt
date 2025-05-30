@@ -6,3 +6,8 @@ cloudinary
 python-multipart
 fastapi-mail
 tzdata
+yt-dlp
+pytz
+bcrypt
+
+

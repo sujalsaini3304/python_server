@@ -1,7 +1,7 @@
 from fastapi import FastAPI , File , UploadFile , Form , BackgroundTasks , HTTPException
 from dotenv import load_dotenv
 import os
-from pydantic import BaseModel ,  EmailStr
+from pydantic import BaseModel ,  EmailStr , Field
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure 
 import cloudinary
@@ -13,6 +13,11 @@ from fastapi_mail import FastMail, MessageSchema, MessageType
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import json
+import yt_dlp
+import subprocess
+import io
+import pytz
+import bcrypt
 
 origins = ["*"]
 
@@ -69,7 +74,218 @@ async def upload(file:UploadFile = File(...)):
         "public_id":response.get("public_id")
     }
 
+class TrackResponse(BaseModel):
+    id: str = Field(..., alias="_id")
+    duration: int
+    title: str
+    artist: str
+    genre: str
+    album: str
+    year: int | None = None
+    fileSize: int | None = None
+    format: str
+    bitRate: int | None = None
+    sampleRate: int | None = None
+    originalFilename: str
+    cloudinary_url: str
+    cloudinary_id: str
+    created_at: datetime
+    like_count: int
+    thumbnail: str | None
 
+class YouTubeURL(BaseModel):
+    url: str
+
+
+# def get_ist_time():
+#     ist = pytz.timezone("Asia/Kolkata")
+#     return datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(ist)
+
+
+#upload from youtube link
+@app.post("/api/upload/youtube/url")
+async def upload_from_youtube_link(data : YouTubeURL):
+     client = None
+     try:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio'}) as ydl:
+            info = ydl.extract_info(data.url, download=False)
+            audio_url = info['url']
+            title = info.get('title', 'Unknown Title')
+            artist = info.get('uploader', 'Unknown Artist')
+            duration = int(info.get('duration', 0))
+            thumbnail = info.get('thumbnail', None)
+        
+        # Convert audio to MP3 in memory
+        ffmpeg_cmd = [
+            'ffmpeg', '-i', audio_url,
+            '-f', 'mp3', '-vn', '-acodec', 'libmp3lame', '-ab', '192k',
+            '-hide_banner', '-loglevel', 'error', 'pipe:1'
+        ]
+        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="FFmpeg failed: " + result.stderr.decode())
+        
+        mp3_data = io.BytesIO(result.stdout)
+        original_filename = f"{title}.mp3"
+        mp3_data.name = original_filename
+
+        # Upload to Cloudinary (as video resource for audio)
+        upload_result = cloudinary.uploader.upload(
+            mp3_data, resource_type="video", folder = "my-music-web-app/data/test/"
+        )
+
+        created_at = datetime.now(timezone.utc)
+
+        # File size from upload result or mp3_data size
+        file_size = upload_result.get("bytes", len(mp3_data.getbuffer()))
+        year = info.get("year") 
+        track_doc = {
+            "duration": duration,
+            "title": title,
+            "artist": artist,
+            "genre": "Unknown Genre",
+            "album": "Unknown Album",
+            "year": None,
+            "fileSize": file_size,
+            "format": "mp3",
+            "bitRate": None,
+            "sampleRate": None,
+            "originalFilename": original_filename,
+            "cloudinary_url": upload_result.get("secure_url"),
+            "cloudinary_id": upload_result.get("public_id"),
+            "created_at": created_at,
+            "like_count": 0,
+            "thumbnail": thumbnail,
+        }
+        
+        if year is not None:
+           track_doc["year"] = year
+
+        client = MongoClient(os.getenv("MONGODB_URL"))
+        client.admin.command('ping')
+        print("Connection established with database successfully.")
+        db = client["myMusicDatabase"]
+        collection = db["test"]
+
+        doc = collection.insert_one(track_doc)
+        saved_track = collection.find_one({"_id":doc.inserted_id})
+        created_at_ist = saved_track["created_at"].astimezone(ZoneInfo("Asia/Kolkata"))
+
+        # Return MongoDB document with _id as string alias
+        track_doc["_id"] = str(doc.inserted_id)
+        track_doc["created_at"] = created_at_ist
+
+        return track_doc
+
+     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+     finally:
+        if client :
+           client.close()
+           print("Connection closed with database.")   
+
+
+
+class User(BaseModel):
+    username : str
+    email: str
+    password : str
+
+@app.post("/api/music-web-app/create/user")
+async def createUser(data:User):
+    client = None
+    try:
+       client =  MongoClient(os.getenv("MONGODB_URL"))
+       client.admin.command('ping')
+       print("Connection established with database successfully.")
+       db = client["myMusicDatabase"]
+       collection = db["user"]
+       hashed_password = bcrypt.hashpw(data.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+       obj = {
+           "username":data.username,
+           "email":data.email,
+           "password":hashed_password,
+           "created_at":datetime.now(),
+           "is_verified":False,
+           "role":"user"
+       }
+       collection.insert_one(obj)
+       return{
+        "ConnectionToDatabase":"Okay",  
+        "Status" : True ,
+        "Message":"User created in database successfully."
+       }
+    except ConnectionFailure as e:
+        return {
+        "Message":"Error in connecting to database."
+        }
+    except Exception as e :
+        return {    
+        "ConnectionToDatabase":"Okay",   
+        "Message":"User is not created in database.",
+        "Error" : str(e)
+        }
+    finally:
+       if client :
+            client.close()
+            print("Connection closed with database.")   
+
+
+class UserCredential(BaseModel):
+    email: str
+    password : str
+
+#login
+@app.post("/api/music-web-app/login/user")
+async def createUser(data:UserCredential):
+    client = None
+    try:
+       client =  MongoClient(os.getenv("MONGODB_URL"))
+       client.admin.command('ping')
+       print("Connection established with database successfully.")
+       db = client["myMusicDatabase"]
+       collection = db["user"]
+       fetchedData = collection.find_one({"email" : data.email})
+       if not fetchedData:
+            return {
+                "ConnectionToDatabase": "Okay",
+                "Status": False,
+                "Error": "User not found",
+                "Message": "Login failed."
+            }
+       stored_hash = fetchedData.get("password", "")
+       input_password = data.password
+       if bcrypt.checkpw(input_password.encode('utf-8'), stored_hash.encode('utf-8')):
+          return{
+          "ConnectionToDatabase":"Okay",  
+          "Status" : True ,
+          "Message":"Login successfully."
+           }
+       else:
+          return{
+          "ConnectionToDatabase":"Okay",  
+          "Status" : False ,
+          "Error":"Password incorrect",
+          "Message":"Login failed."
+           }
+       
+    except ConnectionFailure as e:
+        return {
+        "Message":"Error in connecting to database."
+        }
+    except Exception as e :
+        return {    
+        "ConnectionToDatabase":"Okay",   
+        "Message":"Something went wrong.",
+        "Error" : str(e)
+        }
+    finally:
+       if client :
+            client.close()
+            print("Connection closed with database.")   
+
+
+         
 
 #music-app
 @app.post("/api/upload/music")
@@ -100,6 +316,8 @@ async def upload_music(
             **track_metadata,
             "cloudinary_url": cloudinary_result["secure_url"],
             "cloudinary_id": cloudinary_result["public_id"],
+            "thumbnail":"null",
+            "like_count":0,
             "created_at":datetime.now(timezone.utc)
         })
         
@@ -114,6 +332,8 @@ async def upload_music(
             "album": saved_track["album"],
             "duration": saved_track["duration"],
             "cloudinary_url": saved_track["cloudinary_url"],
+            "thumbnail":"null",
+            "like_count":0,
             "created_at": created_at_ist.isoformat()
         }
         
