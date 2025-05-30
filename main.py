@@ -200,6 +200,22 @@ async def createUser(data:User):
        print("Connection established with database successfully.")
        db = client["myMusicDatabase"]
        collection = db["user"]
+       doc = collection.find_one({"email":data.email})
+       if  doc :
+           return {
+                 "ConnectionToDatabase":"Okay",   
+                 "Status" : False ,
+                 "Message":"User already exists in database.",
+           }
+       collection_ = db["userData"]
+       obj_ = {
+           "email":data.email,
+           "favourite_songs":[],
+           "favourite_videos":[],
+           "subscription":"free",
+           "created_at":datetime.now()
+       }
+       collection_.insert_one(obj_)
        hashed_password = bcrypt.hashpw(data.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
        obj = {
            "username":data.username,
@@ -237,7 +253,7 @@ class UserCredential(BaseModel):
 
 #login
 @app.post("/api/music-web-app/login/user")
-async def createUser(data:UserCredential):
+async def userLogin(data:UserCredential):
     client = None
     try:
        client =  MongoClient(os.getenv("MONGODB_URL"))
@@ -278,6 +294,68 @@ async def createUser(data:UserCredential):
         "ConnectionToDatabase":"Okay",   
         "Message":"Something went wrong.",
         "Error" : str(e)
+        }
+    finally:
+       if client :
+            client.close()
+            print("Connection closed with database.")   
+
+
+
+class UserId(BaseModel):
+    email: str
+    song_id: str
+
+#update favourite song
+@app.post("/api/music-web-app/update/favourite/user/song/")
+async def updateFavouriteSong(data:UserId):
+    client = None
+    try:
+       client =  MongoClient(os.getenv("MONGODB_URL"))
+       client.admin.command('ping')
+       print("Connection established with database successfully.")
+       db = client["myMusicDatabase"]
+       collection = db["userData"]
+       fetchedData = collection.find_one({"email" : data.email})
+       if not fetchedData:
+            return {
+                "ConnectionToDatabase": "Okay",
+                "Status": False,
+                "Error": "User not found",
+                "Message": "Update failed."
+            }
+       arr = fetchedData.get("favourite_songs", [])
+       if data.song_id not in arr: 
+          arr.append(data.song_id)
+          collection.update_one({"email":data.email} , {"$set":{"favourite_songs" : arr}})
+          return{
+          "ConnectionToDatabase":"Okay",  
+          "Inserted":True,
+          "Deleted":False,
+          "Status" : True ,
+          "Message":"Song added successfully."
+           }
+       else :
+          arr.remove(data.song_id)
+          collection.update_one({"email":data.email} , {"$set":{"favourite_songs" : arr}})
+          return{
+          "ConnectionToDatabase":"Okay",  
+          "Inserted":False,
+          "Deleted":True,
+          "Status" : True ,
+          "Message":"Song removed successfully."
+           }
+    except ConnectionFailure as e:
+        return {
+        "Message":"Error in connecting to database.",
+        "Status":False
+        }
+    except Exception as e :
+        return {    
+        "ConnectionToDatabase":"Okay",   
+        "Message":"Something went wrong.",
+        "Error" : str(e),
+        "Status":False
         }
     finally:
        if client :
