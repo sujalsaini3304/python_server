@@ -96,12 +96,6 @@ class TrackResponse(BaseModel):
 class YouTubeURL(BaseModel):
     url: str
 
-
-# def get_ist_time():
-#     ist = pytz.timezone("Asia/Kolkata")
-#     return datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(ist)
-
-
 #upload from youtube link
 @app.post("/api/upload/youtube/url")
 async def upload_from_youtube_link(data : YouTubeURL):
@@ -294,6 +288,51 @@ async def userLogin(data:UserCredential):
         "ConnectionToDatabase":"Okay",   
         "Message":"Something went wrong.",
         "Error" : str(e)
+        }
+    finally:
+       if client :
+            client.close()
+            print("Connection closed with database.")   
+
+
+class userEmail(BaseModel):
+    email: str
+
+@app.get("/api/music-web-app/fetch/favourite/user/song/")
+async def fetchFavouriteSong(data : userEmail):
+    client = None
+    try:
+       client =  MongoClient(os.getenv("MONGODB_URL"))
+       client.admin.command('ping')
+       print("Connection established with database successfully.")
+       db = client["myMusicDatabase"]
+       collection = db["userData"]
+       fetchedData = collection.find_one({"email" : data.email})
+       if not fetchedData:
+            return {
+                "ConnectionToDatabase": "Okay",
+                "Status": False,
+                "Error": "User not found",
+                "Message": "Fetch failed."
+            }
+       arr = fetchedData.get("favourite_songs", [])
+       return{
+          "ConnectionToDatabase":"Okay",  
+          "Status" : True ,
+          "Data" : arr,
+          "Message":"Song fetched successfully."
+           }
+    except ConnectionFailure as e:
+        return {
+        "Message":"Error in connecting to database.",
+        "Status":False
+        }
+    except Exception as e :
+        return {    
+        "ConnectionToDatabase":"Okay",   
+        "Message":"Something went wrong.",
+        "Error" : str(e),
+        "Status":False
         }
     finally:
        if client :
