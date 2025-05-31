@@ -1,4 +1,4 @@
-from fastapi import FastAPI , File , UploadFile , Form , BackgroundTasks , HTTPException
+from fastapi import FastAPI , File , UploadFile , Form , BackgroundTasks , HTTPException , Query
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel ,  EmailStr , Field
@@ -295,11 +295,8 @@ async def userLogin(data:UserCredential):
             print("Connection closed with database.")   
 
 
-class userEmail(BaseModel):
-    email: str
-
 @app.get("/api/music-web-app/fetch/favourite/user/song/")
-async def fetchFavouriteSong(data : userEmail):
+async def fetchFavouriteSong(email: str = Query(...)):
     client = None
     try:
        client =  MongoClient(os.getenv("MONGODB_URL"))
@@ -307,7 +304,7 @@ async def fetchFavouriteSong(data : userEmail):
        print("Connection established with database successfully.")
        db = client["myMusicDatabase"]
        collection = db["userData"]
-       fetchedData = collection.find_one({"email" : data.email})
+       fetchedData = collection.find_one({"email" : email})
        if not fetchedData:
             return {
                 "ConnectionToDatabase": "Okay",
